@@ -3,188 +3,147 @@
 <head>
     <title>PhyloTree App</title>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; background: #0b0e14; color: white; }
+        body { font-family: 'Segoe UI', sans-serif; padding: 30px; background: #0b0e14; color: white; }
+        .container { max-width: 900px; margin: auto; }
         h2 { border-bottom: 2px solid #007bff; padding-bottom: 10px; }
-        textarea { 
-            width: 100%; 
-            height: 150px; 
-            margin-bottom: 15px; 
-            background: #1a1d23; 
-            color: #00ffcc; 
-            border: 1px solid #333; 
-            padding: 10px;
-            font-family: monospace;
-        }
-        button {
-            padding: 12px 24px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: background 0.3s;
-        }
+        
+        .section { background: #1a1d23; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #333; }
+        label { display: block; margin-bottom: 10px; font-weight: bold; color: #00ffcc; }
+        
+        textarea { width: 100%; height: 120px; background: #252932; color: white; border: 1px solid #444; padding: 10px; font-family: monospace; }
+        select, input[type="file"] { width: 100%; padding: 10px; background: #252932; color: white; border: 1px solid #444; margin-bottom: 15px; }
+        
+        .btn-group { display: flex; gap: 10px; }
+        button { flex: 1; padding: 12px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
         button:hover { background: #0056b3; }
-        #output {
-            margin-top: 20px;
-            padding: 15px;
-            background: #1a1d23;
-            border-left: 4px solid #007bff;
-            min-height: 20px;
-        }
-        #tree {
-            margin-top: 30px;
-            background: #ffffff; /* White background for the tree to make colors pop */
-            border-radius: 8px;
-        }
+        
+        #output { margin-top: 20px; padding: 15px; background: #1a1d23; border-left: 4px solid #007bff; color: #ffcc00; }
+        svg { background: white; margin-top: 20px; border-radius: 8px; width: 100%; height: 500px; }
     </style>
 </head>
 <body>
 
-<h2>Phylogenetic Tree App</h2>
+<div class="container">
+    <h2>Phylogenetic Tree App</h2>
 
-<p>Enter your FASTA sequences below to generate an evolutionary tree:</p>
+    <div class="section">
+        <label>1. Input Method (FASTA / UniProt / File)</label>
+        <select id="inputMethod" onchange="toggleInput()">
+            <option value="fasta">Paste FASTA Sequences</option>
+            <option value="uniprot">Fetch from UniProt (IDs)</option>
+            <option value="file">Upload .fasta File</option>
+        </select>
 
-<textarea id="fastaInput">
->seq1
-MKTAYIAKQRQISFVKSHFSRQDILDLWIYHTQGYFPDWQNY
->seq2
-MKTAYIAKQRQISFVKSHFSRQDILDLWIYHTQGYFPDWQNA
-</textarea>
+        <textarea id="fastaInput" placeholder=">seq1\nATGC..."></textarea>
+        <input type="file" id="fileUpload" style="display:none;">
+    </div>
 
-<br>
+    <div class="section">
+        <label>2. Alignment Tool</label>
+        <select id="algo">
+            <option value="mafft">MAFFT (Fast & Accurate)</option>
+            <option value="muscle">MUSCLE (Detailed)</option>
+        </select>
+        
+        <button onclick="runAnalysis()">Run Full Analysis</button>
+    </div>
 
-<button onclick="runAnalysis()">Run Analysis</button>
-
-<div id="output">No analysis running.</div>
-<svg id="tree" width="800" height="400"></svg>
+    <div id="output">System Ready.</div>
+    <svg id="tree"></svg>
+</div>
 
 <script>
-
 const BASE = window.location.origin;
+
+function toggleInput() {
+    const method = document.getElementById("inputMethod").value;
+    document.getElementById("fastaInput").style.display = (method === 'file') ? 'none' : 'block';
+    document.getElementById("fileUpload").style.display = (method === 'file') ? 'block' : 'none';
+}
 
 async function runAnalysis() {
     const out = document.getElementById("output");
-    out.innerText = "Processing sequences and calculating distances...";
-
-    let data = document.getElementById("fastaInput").value;
-    let encoded = encodeURIComponent(data);
+    const algo = document.getElementById("algo").value;
+    out.innerText = "Connecting to Java backend...";
 
     try {
-        // Step 1: Send FASTA
-        await fetch(`${BASE}/api/fasta?data=${encoded}`);
+        let data = document.getElementById("fastaInput").value;
         
-        // Step 2: Align
+        // Step 1: Send Data to Backend
+        // We pass the 'algo' so the Java code knows whether to call MAFFT or MUSCLE
+        await fetch(`${BASE}/api/fasta?data=${encodeURIComponent(data)}&tool=${algo}`);
+        out.innerText = `Aligning sequences using ${algo.toUpperCase()}...`;
+
+        // Step 2: Trigger Alignment
         await fetch(`${BASE}/api/align`);
+        out.innerText = "Building Phylogenetic Tree (FastTree)...";
 
-        // Step 3: Get Tree Data
+        // Step 3: Fetch Resulting Newick Tree
         let res = await fetch(`${BASE}/api/tree`);
-        let treeData = await res.text();
+        let treeText = await res.text();
 
-        if (treeData) {
-            drawTree(treeData);
+        if (treeText.includes("(") && treeText.includes(")")) {
             out.innerText = "Analysis Complete! Tree rendered below.";
+            drawTree(treeText);
         } else {
-            out.innerText = "Error: Backend returned empty tree data.";
+            out.innerText = "Backend Error: " + treeText;
         }
-    } catch (error) {
-        out.innerText = "Connection Error: Is the Java backend running?";
-        console.error(error);
+    } catch (e) {
+        out.innerText = "Failed to communicate with server. Check Java logs.";
     }
 }
+
+// ... (Keep the drawTree, parseNewick, and randomColor functions from the previous version) ...
 
 function drawTree(newick) {
     document.getElementById("tree").innerHTML = "";
     const svg = d3.select("#tree");
-    const width = 800, height = 400;
-
-    const treeLayout = d3.tree().size([height - 40, width - 160]);
+    const width = 800, height = 500;
+    const treeLayout = d3.tree().size([height - 50, width - 200]);
     const root = d3.hierarchy(parseNewick(newick));
-
     treeLayout(root);
+    const g = svg.append("g").attr("transform", "translate(80,25)");
 
-    const g = svg.append("g").attr("transform", "translate(60,20)");
+    g.selectAll("line").data(root.links()).enter().append("line")
+        .attr("x1", d => d.source.y).attr("y1", d => d.source.x)
+        .attr("x2", d => d.target.y).attr("y2", d => d.target.x)
+        .attr("stroke", () => randomColor()).attr("stroke-width", 2);
 
-    // Links (Branches)
-    g.selectAll("line")
-        .data(root.links())
-        .enter()
-        .append("line")
-        .attr("x1", d => d.source.y)
-        .attr("y1", d => d.source.x)
-        .attr("x2", d => d.target.y)
-        .attr("y2", d => d.target.x)
-        .attr("stroke", () => randomColor())
-        .attr("stroke-width", 2);
+    g.selectAll("circle").data(root.descendants()).enter().append("circle")
+        .attr("cx", d => d.y).attr("cy", d => d.x).attr("r", 5).attr("fill", "#333");
 
-    // Nodes
-    g.selectAll("circle")
-        .data(root.descendants())
-        .enter()
-        .append("circle")
-        .attr("cx", d => d.y)
-        .attr("cy", d => d.x)
-        .attr("r", 5)
-        .attr("fill", "#333");
-
-    // Labels
-    g.selectAll("text")
-        .data(root.descendants())
-        .enter()
-        .append("text")
-        .attr("x", d => d.y + 10)
-        .attr("y", d => d.x + 5)
-        .attr("fill", "#333")
-        .style("font-size", "12px")
-        .style("font-weight", "bold")
-        .text(d => d.data.name || "");
+    g.selectAll("text").data(root.descendants()).enter().append("text")
+        .attr("x", d => d.y + 10).attr("y", d => d.x + 5)
+        .attr("fill", "#333").style("font-size", "12px").text(d => d.data.name || "");
 }
 
 function parseNewick(s) {
-    let ancestors = [];
-    let tree = {};
+    let ancestors = []; let tree = {};
     let tokens = s.split(/\s*(;|\(|\)|,|:)\s*/);
-
     for (let i = 0; i < tokens.length; i++) {
         let token = tokens[i];
         switch (token) {
             case '(': 
-                let subtree = {};
-                if (!tree.children) tree.children = [];
-                tree.children.push(subtree);
-                ancestors.push(tree);
-                tree = subtree;
+                let subtree = {}; if (!tree.children) tree.children = [];
+                tree.children.push(subtree); ancestors.push(tree); tree = subtree;
                 break;
             case ',':
-                let sibling = {};
-                ancestors[ancestors.length - 1].children.push(sibling);
-                tree = sibling;
+                let sibling = {}; ancestors[ancestors.length - 1].children.push(sibling); tree = sibling;
                 break;
-            case ')':
-                tree = ancestors.pop();
-                break;
-            case ':':
-                break;
+            case ')': tree = ancestors.pop(); break;
+            case ':': break;
             default:
-                if (tokens[i - 1] === ':' ) {
-                    tree.length = parseFloat(token);
-                } else {
-                    tree.name = token;
-                }
+                if (tokens[i - 1] === ':' ) { tree.length = parseFloat(token); }
+                else { tree.name = token; }
         }
     }
     return tree;
 }
 
 function randomColor() {
-    const colors = ["#e63946", "#457b9d", "#2a9d8f", "#8338ec", "#f4a261", "#70e000"];
-    return colors[Math.floor(Math.random() * colors.length)];
+    return ["#e63946", "#457b9d", "#2a9d8f", "#8338ec", "#f4a261"][Math.floor(Math.random() * 5)];
 }
-
 </script>
-
 </body>
 </html>
