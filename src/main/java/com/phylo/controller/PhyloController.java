@@ -28,40 +28,28 @@ public class PhyloController {
     }
 
     // -------- ALIGN --------
-    @GetMapping("/align")
-    public String align(@RequestParam(value = "tool", defaultValue = "mafft") String tool) throws Exception {
+    blic ResponseEntity<String> align(@RequestParam String tool) {
+    try {
+        // Use /bin/sh -c to handle the file redirection '>'
+        String command = tool.equals("mafft") 
+            ? "mafft input.fasta > aligned.fasta" 
+            : "muscle -in input.fasta -out aligned.fasta";
 
-        String input = "input.fasta";
-        String output = "aligned.fasta";
-
-        File inFile = new File(input);
-        if (!inFile.exists()) {
-            return "ERROR: input.fasta not found";
-        }
-
-        File outFile = new File(output);
-        if (outFile.exists()) outFile.delete();
-
-        ProcessBuilder pb;
-
-        if (tool.equalsIgnoreCase("muscle")) {
-            pb = new ProcessBuilder("muscle", "-align", input, "-output", output);
-        } else {
-            pb = new ProcessBuilder("mafft", "--auto", input);
-            pb.redirectOutput(outFile);
-            pb.redirectError(new File("mafft.log"));
-        }
-
+        ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command);
+        pb.directory(new File("/app")); // Ensure workdir is correct
         Process process = pb.start();
-        process.waitFor();
-
-        if (!outFile.exists() || outFile.length() == 0) {
-            return "ERROR: alignment failed";
+        
+        int exitCode = process.waitFor(); // CRITICAL: Java must wait for MAFFT to finish!
+        
+        if (exitCode == 0) {
+            return ResponseEntity.ok("Alignment Finished");
+        } else {
+            return ResponseEntity.status(500).body("Alignment tool failed with exit code " + exitCode);
         }
-
-        return "ALIGNMENT SUCCESS";
+    } catch (Exception e) {
+        return ResponseEntity.status(500).body("Java Error: " + e.getMessage());
     }
-
+}
     // -------- TREE --------
     @GetMapping("/tree")
     public String tree() throws Exception {
@@ -114,3 +102,6 @@ public class PhyloController {
         return tree.toString();
     }
 }
+
+@GetMapping("/api/align")
+pu
