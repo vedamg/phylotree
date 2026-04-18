@@ -4,117 +4,146 @@
     <title>PhyloTree App</title>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 30px; background: #0b0e14; color: white; }
-        .container { max-width: 900px; margin: auto; }
-        .section { background: #1a1d23; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #333; }
-        label { display: block; margin-bottom: 10px; font-weight: bold; color: #00ffcc; }
-        textarea { width: 100%; height: 150px; background: #252932; color: white; border: 1px solid #444; padding: 10px; font-family: monospace; }
-        select, input[type="file"] { width: 100%; padding: 10px; background: #252932; color: white; border: 1px solid #444; margin-bottom: 15px; }
-        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; margin-right: 10px; }
-        button.secondary { background: #28a745; }
-        #output { margin-top: 20px; padding: 15px; background: #1a1d23; border-left: 4px solid #007bff; color: #ffcc00; }
-        svg { background: white; margin-top: 20px; border-radius: 8px; width: 100%; height: 500px; }
+        body { font-family: 'Segoe UI', sans-serif; padding: 40px; background: #0b0e14; color: white; }
+        .section { background: #1a1d23; padding: 25px; border-radius: 12px; margin-bottom: 25px; border: 1px solid #333; }
+        label { display: block; margin-bottom: 12px; font-weight: bold; color: #00ffcc; }
+        textarea { width: 100%; height: 200px; background: #252932; color: #00ffcc; border: 1px solid #444; padding: 12px; font-family: monospace; }
+        .btn-row { display: flex; gap: 10px; margin-top: 15px; }
+        button { flex: 1; padding: 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-fetch { background: #6f42c1; color: white; }
+        #output { margin-top: 20px; padding: 15px; background: #000; border-left: 5px solid #007bff; color: #00ff00; font-family: monospace; }
+        #treeVis { background: white; margin-top: 25px; border-radius: 10px; width: 100%; min-height: 500px; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h2>Phylogenetic Tree App</h2>
+<div style="max-width: 1000px; margin: auto;">
+    <h2>🧬 Phylogenetic Pipeline</h2>
 
     <div class="section">
-        <label>1. Sequence Input / UniProt IDs</label>
-        <select id="inputMethod" onchange="toggleInput()">
+        <label>1. Gather Sequences</label>
+        <select id="method" style="width: 100%; padding: 10px; margin-bottom: 10px;" onchange="updateUI()">
             <option value="fasta">Paste FASTA</option>
             <option value="uniprot">UniProt IDs</option>
-            <option value="file">Upload .fasta File</option>
+            <option value="file">Upload .fasta</option>
         </select>
-        
-        <input type="file" id="fileInput" style="display:none;" onchange="handleFileUpload()">
-        <textarea id="fastaArea" placeholder="Paste sequences or IDs here..."></textarea>
-        <button onclick="fetchSequences()" id="fetchBtn" style="display:none; margin-top:10px;">Fetch Sequences</button>
+        <input type="file" id="fileIn" style="display:none;" onchange="loadLocalFile()">
+        <textarea id="sequenceBox" placeholder="Paste data..."></textarea>
+        <button id="fetchBtn" class="btn-fetch" style="display:none; margin-top:10px;" onclick="doFetch()">Fetch from UniProt</button>
     </div>
 
     <div class="section">
-        <label>2. Alignment & Tree Generation</label>
-        <select id="algo">
+        <label>2. Run & Export</label>
+        <select id="tool" style="width: 100%; padding: 10px; margin-bottom: 15px;">
             <option value="mafft">MAFFT</option>
             <option value="muscle">MUSCLE</option>
         </select>
-        <button onclick="runAnalysis()">Run Full Pipeline</button>
-        <button class="secondary" onclick="downloadTree()">Download Newick (.nwk)</button>
+        <div class="btn-row">
+            <button class="btn-primary" onclick="runAll()">Generate Tree</button>
+            <button id="dlBtn" class="btn-success" style="opacity: 0.5;" onclick="downloadImage()" disabled>Download PNG Image</button>
+        </div>
     </div>
 
-    <div id="output">System Ready.</div>
-    <svg id="tree"></svg>
+    <div id="output">Status: Ready.</div>
+    <svg id="treeVis"></svg>
 </div>
 
 <script>
-const BASE = window.location.origin;
-let currentTreeNewick = "";
+const API = window.location.origin + "/api";
 
-function toggleInput() {
-    const method = document.getElementById("inputMethod").value;
-    document.getElementById("fileInput").style.display = (method === 'file') ? 'block' : 'none';
-    document.getElementById("fastaArea").style.display = (method === 'file') ? 'none' : 'block';
-    document.getElementById("fetchBtn").style.display = (method === 'uniprot') ? 'block' : 'none';
+function updateUI() {
+    const m = document.getElementById("method").value;
+    document.getElementById("fileIn").style.display = (m==='file') ? 'block' : 'none';
+    document.getElementById("fetchBtn").style.display = (m==='uniprot') ? 'block' : 'none';
 }
 
-async function handleFileUpload() {
-    const file = document.getElementById("fileInput").files[0];
-    const text = await file.text();
-    document.getElementById("fastaArea").value = text;
-    document.getElementById("fastaArea").style.display = 'block';
+async function loadLocalFile() {
+    const file = document.getElementById("fileIn").files[0];
+    document.getElementById("sequenceBox").value = await file.text();
 }
 
-async function fetchSequences() {
+async function doFetch() {
+    const box = document.getElementById("sequenceBox");
     const out = document.getElementById("output");
-    const ids = document.getElementById("fastaArea").value;
-    out.innerText = "Fetching sequences from UniProt...";
-    try {
-        const res = await fetch(`${BASE}/api/fasta?data=${encodeURIComponent(ids)}&method=uniprot`);
-        const fasta = await res.text();
-        document.getElementById("fastaArea").value = fasta;
-        out.innerText = "Sequences fetched successfully.";
-    } catch (e) { out.innerText = "Fetch failed."; }
+    out.innerText = "Status: Fetching...";
+    const res = await fetch(`${API}/fasta?data=${encodeURIComponent(box.value)}&method=uniprot`);
+    box.value = await res.text();
+    out.innerText = "Status: Sequences retrieved.";
 }
 
-async function runAnalysis() {
+async function runAll() {
     const out = document.getElementById("output");
-    const data = document.getElementById("fastaArea").value;
-    const tool = document.getElementById("algo").value;
+    const box = document.getElementById("sequenceBox");
+    const tool = document.getElementById("tool").value;
 
     try {
-        out.innerText = "Saving input...";
-        await fetch(`${BASE}/api/fasta?data=${encodeURIComponent(data)}&method=fasta`);
+        out.innerText = "Status: Processing...";
+        await fetch(`${API}/fasta?data=${encodeURIComponent(box.value)}&method=fasta`);
+        const res = await fetch(`${API}/runPipeline?tool=${tool}`);
+        const nwk = await res.text();
 
-        out.innerText = `Running ${tool.toUpperCase()}...`;
-        const alignRes = await fetch(`${BASE}/api/align?tool=${tool}`);
-        if (!alignRes.ok) throw new Error("Alignment failed at backend.");
-
-        out.innerText = "Generating Tree...";
-        const treeRes = await fetch(`${BASE}/api/tree`);
-        currentTreeNewick = await treeRes.text();
-
-        if (currentTreeNewick.includes("(")) {
-            drawTree(currentTreeNewick);
-            out.innerText = "Pipeline Success!";
-        } else {
-            out.innerText = "Error: " + currentTreeNewick;
-        }
-    } catch (e) { out.innerText = "Error: " + e.message; }
+        if (nwk.includes("(")) {
+            renderTree(nwk);
+            out.innerText = "Status: Success.";
+            document.getElementById("dlBtn").disabled = false;
+            document.getElementById("dlBtn").style.opacity = 1;
+        } else { out.innerText = "Error: " + nwk; }
+    } catch(e) { out.innerText = "Error: " + e.message; }
 }
 
-function downloadTree() {
-    if (!currentTreeNewick) return alert("Run analysis first!");
-    const blob = new Blob([currentTreeNewick], { type: 'text/plain' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'phylogeny_tree.nwk';
-    a.click();
+function downloadImage() {
+    const svg = document.getElementById("treeVis");
+    const serializer = new XMLSerializer();
+    const source = '<?xml version="1.0" standalone="no"?>\r\n' + serializer.serializeToString(svg);
+    const canvas = document.createElement("canvas");
+    canvas.width = svg.clientWidth * 2;
+    canvas.height = svg.clientHeight * 2;
+    const ctx = canvas.getContext("2d");
+    const img = new Image();
+    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(source)));
+    img.onload = function() {
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const a = document.createElement("a");
+        a.download = "phylogeny.png";
+        a.href = canvas.toDataURL("image/png");
+        a.click();
+    };
 }
 
-// ... Use the drawTree and parseNewick functions from the previous correct versions ...
+function renderTree(nwk) {
+    const svg = d3.select("#treeVis");
+    svg.selectAll("*").remove();
+    const width = 1000, height = 500;
+    const root = d3.hierarchy(parseNewick(nwk));
+    d3.tree().size([height - 40, width - 250])(root);
+    const g = svg.append("g").attr("transform", "translate(60,20)");
+    g.selectAll("path").data(root.links()).enter().append("path")
+        .attr("d", d3.linkHorizontal().x(d => d.y).y(d => d.x))
+        .attr("fill", "none").attr("stroke", "#000").attr("stroke-width", 2);
+    g.selectAll("text").data(root.descendants()).enter().append("text")
+        .attr("x", d => d.y + 10).attr("y", d => d.x + 4)
+        .text(d => d.data.name).style("font-size", "14px").attr("fill", "#000");
+}
+
+function parseNewick(s) {
+    let ancestors = []; let tree = {};
+    let tokens = s.split(/\s*(;|\(|\)|,|:)\s*/);
+    for (let i = 0; i < tokens.length; i++) {
+        let token = tokens[i];
+        if (token === '(') {
+            let subtree = {}; if (!tree.children) tree.children = [];
+            tree.children.push(subtree); ancestors.push(tree); tree = subtree;
+        } else if (token === ',') {
+            let sibling = {}; ancestors[ancestors.length - 1].children.push(sibling); tree = sibling;
+        } else if (token === ')') { tree = ancestors.pop(); }
+        else if (token !== ':' && token !== ';' && tokens[i-1] !== ':') { tree.name = token; }
+    }
+    return tree;
+}
 </script>
 </body>
 </html>
