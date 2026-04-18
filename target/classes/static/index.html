@@ -1,299 +1,164 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>PhyloTree Analyzer</title>
+    <title>PhyloTree App</title>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 
-<script src="https://d3js.org/d3.v7.min.js"></script>
-
-<style>
-body { background:#020617; color:white; font-family:Arial; }
-.container { width:85%; margin:auto; }
-
-textarea, select, input {
-    width:100%; margin:10px 0; padding:10px;
-    background:#020617; color:white; border:1px solid #444;
-}
-
-button { padding:10px; margin:10px; background:#38bdf8; border:none; }
-
-#tree { height:600px; border:1px solid #444; margin-top:20px; }
-
-#sequenceDisplay {
-    border:1px solid #444;
-    padding:10px;
-    max-height:200px;
-    overflow:auto;
-    white-space:pre-wrap;
-}
-
-.hidden { display:none; }
-</style>
+    <style>
+        body { font-family: Arial; padding: 20px; background: #f5f5f5; }
+        textarea { width: 100%; height: 150px; margin-bottom: 10px; }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            background: white;
+            white-space: pre-wrap;
+        }
+        #tree {
+            margin-top: 20px;
+        }
+    </style>
 </head>
-
 <body>
 
-<div class="container">
+<h2>Phylogenetic Tree App</h2>
 
-<h2>Phylogenetic Tree 🌳</h2>
+<textarea id="fastaInput">
+>seq1
+MKTAYIAKQRQISFVKSHFSRQDILDLWIYHTQGYFPDWQNY
+>seq2
+MKTAYIAKQRQISFVKSHFSRQDILDLWIYHTQGYFPDWQNA
+</textarea>
 
-<select id="inputType" onchange="switchInput()">
-<option value="uniprot">UniProt</option>
-<option value="fasta">FASTA</option>
-<option value="file">File</option>
-</select>
+<br>
 
-<div id="uniprotBox">
-<textarea id="uniprot"></textarea>
-<button onclick="fetchSeq()">Fetch Sequences</button>
-</div>
+<button onclick="runAnalysis()">Run Analysis</button>
 
-<div id="fastaBox" class="hidden">
-<textarea id="fasta"></textarea>
-</div>
-
-<div id="fileBox" class="hidden">
-<input type="file" id="fileInput">
-</div>
-
-<h3>Retrieved Sequences</h3>
-<div id="sequenceDisplay"></div>
-
-<h3>Analysis Type</h3>
-<select id="analysisType" onchange="toggleMethod()">
-<option value="evolution">Evolution</option>
-<option value="similarity">Similarity</option>
-</select>
-
-<div id="methodBox" style="display:none;">
-<h3>Tree Method</h3>
-<select id="method">
-<option value="upgma">UPGMA</option>
-<option value="nj">Neighbor Joining</option>
-</select>
-</div>
-
-<h3>Alignment Tool</h3>
-<select id="tool">
-<option value="mafft">MAFFT</option>
-<option value="muscle">MUSCLE</option>
-</select>
-
-<button onclick="run()">Run Analysis</button>
-<button onclick="openDownload()">Download Tree</button>
-
-<div id="tree"></div>
-
-</div>
-
-<!-- DOWNLOAD MODAL -->
-<div id="downloadBox" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);justify-content:center;align-items:center;">
-<div style="background:#020617;padding:20px;">
-<h3>Select Format</h3>
-<button onclick="download('png')">PNG</button>
-<button onclick="download('jpg')">JPG</button>
-<br><br>
-<button onclick="closeDownload()">Cancel</button>
-</div>
-</div>
+<div id="output"></div>
+<svg id="tree" width="800" height="400"></svg>
 
 <script>
 
-// INPUT SWITCH
-function switchInput(){
-let t=document.getElementById("inputType").value;
-["uniprotBox","fastaBox","fileBox"].forEach(id=>document.getElementById(id).classList.add("hidden"));
-if(t==="uniprot") document.getElementById("uniprotBox").classList.remove("hidden");
-if(t==="fasta") document.getElementById("fastaBox").classList.remove("hidden");
-if(t==="file") document.getElementById("fileBox").classList.remove("hidden");
+const BASE = window.location.origin;
+
+async function runAnalysis() {
+    const out = document.getElementById("output");
+    out.innerText = "Running...";
+
+    let data = document.getElementById("fastaInput").value;
+    let encoded = encodeURIComponent(data);
+
+    await fetch(`${BASE}/api/fasta?data=${encoded}`);
+    await fetch(`${BASE}/api/align`);
+
+    let res = await fetch(`${BASE}/api/tree`);
+    let tree = await res.text();
+
+    out.innerText = tree;
+    drawTree(tree);
 }
 
-// SHOW METHOD
-function toggleMethod(){
-let mode=document.getElementById("analysisType").value;
-document.getElementById("methodBox").style.display =
-    (mode==="similarity") ? "block" : "none";
+
+// 🔥 SIMPLE TREE DRAW (WITH COLORS)
+function drawTree(newick) {
+
+    document.getElementById("tree").innerHTML = "";
+
+    const svg = d3.select("#tree");
+    const width = 800, height = 400;
+
+    const treeLayout = d3.tree().size([height, width - 100]);
+
+    const root = d3.hierarchy(parseNewick(newick));
+
+    treeLayout(root);
+
+    const g = svg.append("g").attr("transform", "translate(50,0)");
+
+    // links
+    g.selectAll("line")
+        .data(root.links())
+        .enter()
+        .append("line")
+        .attr("x1", d => d.source.y)
+        .attr("y1", d => d.source.x)
+        .attr("x2", d => d.target.y)
+        .attr("y2", d => d.target.x)
+        .attr("stroke", () => randomColor());
+
+    // nodes
+    g.selectAll("circle")
+        .data(root.descendants())
+        .enter()
+        .append("circle")
+        .attr("cx", d => d.y)
+        .attr("cy", d => d.x)
+        .attr("r", 4)
+        .attr("fill", "black");
+
+    // labels
+    g.selectAll("text")
+        .data(root.descendants())
+        .enter()
+        .append("text")
+        .attr("x", d => d.y + 5)
+        .attr("y", d => d.x)
+        .text(d => d.data.name || "");
 }
 
-// FETCH UNIPROT
-async function fetchSeq(){
-let ids=document.getElementById("uniprot").value.split(",");
-let fasta="";
-let display=document.getElementById("sequenceDisplay");
-display.innerHTML="";
+// 🔥 NEWICK PARSER
+function parseNewick(s) {
+    let ancestors = [];
+    let tree = {};
+    let tokens = s.split(/\s*(;|\(|\)|,|:)\s*/);
 
-for(let id of ids){
-let r=await fetch(`https://rest.uniprot.org/uniprotkb/${id.trim()}.fasta`);
-let data=await r.text();
-display.innerText+=data+"\n\n";
-fasta+=data+"\n";
-}
+    for (let i = 0; i < tokens.length; i++) {
+        let token = tokens[i];
 
-document.getElementById("fasta").value=fasta;
-}
+        switch (token) {
+            case '(': 
+                let subtree = {};
+                if (!tree.children) tree.children = [];
+                tree.children.push(subtree);
+                ancestors.push(tree);
+                tree = subtree;
+                break;
 
-// FILE READ
-function readFile(){
-return new Promise(resolve=>{
-let f=document.getElementById("fileInput").files[0];
-let reader=new FileReader();
-reader.onload=e=>{
-document.getElementById("sequenceDisplay").innerText=e.target.result;
-resolve(e.target.result);
-};
-reader.readAsText(f);
-});
-}
+            case ',':
+                let sibling = {};
+                ancestors[ancestors.length - 1].children.push(sibling);
+                tree = sibling;
+                break;
 
-// NEWICK PARSER
-function parseNewick(a){
-let ancestors=[],tree={};
-let tokens=a.split(/\s*(;|\(|\)|,|:)\s*/);
+            case ')':
+                tree = ancestors.pop();
+                break;
 
-for(let i=0;i<tokens.length;i++){
-let t=tokens[i];
-if(t==="("){let s={};tree.children=[s];ancestors.push(tree);tree=s;}
-else if(t===","){let s={};ancestors[ancestors.length-1].children.push(s);tree=s;}
-else if(t===")"){tree=ancestors.pop();}
-else{
-let x=tokens[i-1];
-if(x==="("||x===","||x===")") tree.name=t.split("|")[1]||t;
-}
-}
-return tree;
-}
+            case ':':
+                break;
 
-// DRAW TREE
-function drawTree(nwk){
-
-document.getElementById("tree").innerHTML="";
-
-let root=d3.hierarchy(parseNewick(nwk));
-
-let svg=d3.select("#tree").append("svg")
-.attr("width",1000).attr("height",600);
-
-let g=svg.append("g").attr("transform","translate(80,50)");
-
-d3.tree().size([500,700])(root);
-
-let color = d3.scaleOrdinal(d3.schemeCategory10);
-
-// assign a cluster ID based on first split
-root.children?.forEach((child, i) => {
-    assignColor(child, i);
-});
-
-// recursive coloring
-function assignColor(node, group){
-    node.data.color = color(group);
-
-    if(node.children){
-        node.children.forEach(child => assignColor(child, group));
+            default:
+                if (tokens[i - 1] === ':' ) {
+                    tree.length = parseFloat(token);
+                } else {
+                    tree.name = token;
+                }
+        }
     }
+
+    return tree;
 }
 
-// fallback (if shallow tree)
-root.children?.forEach((child, i) => {
-    if(!child.children){
-        child.descendants().forEach(d => d.color = color(i));
-    }
-});
-
-g.selectAll("path")
-.data(root.links()).enter().append("path")
-.attr("fill","none")
-.attr("stroke",d=>d.target.data.color||"#38bdf8")
-.attr("stroke-width",2)
-.attr("d",d=>`M${d.source.y},${d.source.x} H${d.target.y} V${d.target.x}`);
-
-g.selectAll("text")
-.data(root.descendants()).enter().append("text")
-.attr("x",d=>d.y+8).attr("y",d=>d.x)
-.text(d=>d.data.name||"")
-.attr("fill","white");
-}
-
-// RUN
-async function run(){
-
-let type=document.getElementById("inputType").value;
-let fasta = type==="file" ? await readFile() : document.getElementById("fasta").value;
-
-if(!fasta.includes(">")){
-alert("Invalid FASTA input");
-return;
-}
-
-await fetch('/api/fasta?data='+encodeURIComponent(fasta));
-
-let alignRes = await fetch('/api/align?tool='+document.getElementById("tool").value);
-let alignText = await alignRes.text();
-
-if(alignText.startsWith("ERROR")){
-alert(alignText);
-return;
-}
-
-let mode=document.getElementById("analysisType").value;
-let url;
-
-if(mode==="evolution"){
-url='/api/tree';
-}else{
-let method=document.getElementById("method").value;
-url='/api/similarityTree?method='+method;
-}
-
-let r=await fetch(url);
-let treeText=await r.text();
-
-if(treeText.startsWith("ERROR")){
-alert(treeText);
-return;
-}
-
-drawTree(treeText);
-}
-
-// DOWNLOAD UI
-function openDownload(){
-document.getElementById("downloadBox").style.display="flex";
-}
-
-function closeDownload(){
-document.getElementById("downloadBox").style.display="none";
-}
-
-// DOWNLOAD IMAGE
-function download(format){
-
-closeDownload();
-
-let svg=document.querySelector("#tree svg");
-if(!svg){ alert("Run analysis first"); return; }
-
-let xml=new XMLSerializer().serializeToString(svg);
-let img=new Image();
-let blob=new Blob([xml],{type:"image/svg+xml"});
-let url=URL.createObjectURL(blob);
-
-img.onload=function(){
-let canvas=document.createElement("canvas");
-canvas.width=1000;
-canvas.height=600;
-let ctx=canvas.getContext("2d");
-
-ctx.fillStyle="#020617";
-ctx.fillRect(0,0,1000,600);
-ctx.drawImage(img,0,0);
-
-let a=document.createElement("a");
-a.download="tree."+format;
-a.href=canvas.toDataURL("image/"+format);
-a.click();
-};
-
-img.src=url;
+function randomColor() {
+    const colors = ["red","blue","green","purple","orange","brown","teal"];
+    return colors[Math.floor(Math.random() * colors.length)];
 }
 
 </script>
