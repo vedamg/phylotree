@@ -13,7 +13,7 @@ public class PhyloController {
 
     private final String WORK_DIR = "/app/";
 
-    // Step 1: Handle Input (UniProt fetch or Manual Paste)
+    // Step 1: Input Handling (Fills the 'Retrieved Sequences' box)
     @GetMapping("/fasta")
     public String getFasta(@RequestParam String data, @RequestParam String method) {
         try {
@@ -42,15 +42,18 @@ public class PhyloController {
     @GetMapping("/runPipeline")
     public ResponseEntity<String> runPipeline(@RequestParam String tool) {
         try {
-            // Alignment Step
-            String alignCmd = tool.equalsIgnoreCase("mafft") 
-                ? "mafft input.fasta > aligned.fasta" 
-                : "muscle -in input.fasta -out aligned.fasta";
+            String alignCmd;
+            if (tool.equalsIgnoreCase("mafft")) {
+                alignCmd = "mafft input.fasta > aligned.fasta";
+            } else {
+                // Compatible with both MUSCLE v3 and v5
+                alignCmd = "muscle -align input.fasta -output aligned.fasta || muscle -in input.fasta -out aligned.fasta";
+            }
             
-            Process alignProc = new ProcessBuilder("/bin/sh", "-c", alignCmd).directory(new File(WORK_DIR)).start();
+            Process alignProc = new ProcessBuilder("/bin/sh", "-c", alignCmd)
+                .directory(new File(WORK_DIR)).start();
             if (alignProc.waitFor() != 0) return ResponseEntity.status(500).body("Alignment tool failed.");
 
-            // Tree Step
             Process treeProc = new ProcessBuilder("/bin/sh", "-c", "fasttree aligned.fasta > tree.nwk")
                 .directory(new File(WORK_DIR)).start();
             if (treeProc.waitFor() != 0) return ResponseEntity.status(500).body("FastTree failed.");
