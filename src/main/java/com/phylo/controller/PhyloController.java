@@ -1,94 +1,64 @@
 package com.phylo.controller;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.InputStreamReader;
-import org.springframework.http.ResponseEntity; // ADDED: Missing import
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.http.*;
+import java.io.*;
+import java.net.URL;
+import java.nio.file.*;
+import java.util.Scanner;
 
 @RestController
 @RequestMapping("/api")
 public class PhyloController {
 
-    // -------- SAVE FASTA --------
+    private final String WORK_DIR = "/app/";
+
+    // Step 1: Handle Input (UniProt fetch or Manual Paste)
     @GetMapping("/fasta")
-    public String fasta(@RequestParam("data") String data) throws Exception {
-        String content = data.replace("\\n", "\n").replace("\r", "");
-        FileWriter writer = new FileWriter("input.fasta", false);
-        writer.write(content);
-        writer.close();
-        return "FASTA saved";
+    public String getFasta(@RequestParam String data, @RequestParam String method) {
+        try {
+            StringBuilder content = new StringBuilder();
+            if ("uniprot".equalsIgnoreCase(method)) {
+                String[] ids = data.split("[,\\s\\n]+");
+                for (String id : ids) {
+                    if (id.trim().isEmpty()) continue;
+                    URL url = new URL("https://rest.uniprot.org/uniprotkb/" + id.trim() + ".fasta");
+                    try (Scanner s = new Scanner(url.openStream())) {
+                        while (s.hasNextLine()) content.append(s.nextLine()).append("\n");
+                    }
+                }
+            } else {
+                content.append(data.replace("\\n", "\n").replace("\r", ""));
+            }
+
+            Files.write(Paths.get(WORK_DIR + "input.fasta"), content.toString().getBytes());
+            return content.toString(); 
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
     }
 
-    // -------- ALIGN --------
-    @GetMapping("/align") // ADDED: Missing annotation
-    public ResponseEntity<String> align(@RequestParam String tool) { // FIXED: Was "blic"
+    // Step 2: Run Pipeline (Align -> Tree)
+    @GetMapping("/runPipeline")
+    public ResponseEntity<String> runPipeline(@RequestParam String tool) {
         try {
-            // Use /bin/sh -c to handle the file redirection '>'
-            String command = tool.equalsIgnoreCase("mafft") 
+            // Alignment Step
+            String alignCmd = tool.equalsIgnoreCase("mafft") 
                 ? "mafft input.fasta > aligned.fasta" 
                 : "muscle -in input.fasta -out aligned.fasta";
+            
+            Process alignProc = new ProcessBuilder("/bin/sh", "-c", alignCmd).directory(new File(WORK_DIR)).start();
+            if (alignProc.waitFor() != 0) return ResponseEntity.status(500).body("Alignment tool failed.");
 
-            ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command);
-            pb.directory(new File("/app")); 
-            Process process = pb.start();
-            
-            int exitCode = process.waitFor(); 
-            
-            if (exitCode == 0) {
-                return ResponseEntity.ok("Alignment Finished");
-            } else {
-                return ResponseEntity.status(500).body("Alignment tool failed with exit code " + exitCode);
-            }
+            // Tree Step
+            Process treeProc = new ProcessBuilder("/bin/sh", "-c", "fasttree aligned.fasta > tree.nwk")
+                .directory(new File(WORK_DIR)).start();
+            if (treeProc.waitFor() != 0) return ResponseEntity.status(500).body("FastTree failed.");
+
+            String nwk = new String(Files.readAllBytes(Paths.get(WORK_DIR + "tree.nwk")));
+            return ResponseEntity.ok(nwk);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body("Java Error: " + e.getMessage());
+            return ResponseEntity.status(500).body("Pipeline Error: " + e.getMessage());
         }
-    }
-
-    // -------- TREE --------
-    @GetMapping("/tree")
-    public String tree() throws Exception {
-        return buildTree("nj");
-    }
-
-    // -------- SIMILARITY TREE --------
-    @GetMapping("/similarityTree")
-    public String similarityTree(@RequestParam(defaultValue = "nj") String method) throws Exception {
-        return buildTree(method);
-    }
-
-    // -------- CORE TREE BUILDER --------
-    private String buildTree(String method) throws Exception {
-        File aligned = new File("aligned.fasta");
-
-        if (!aligned.exists() || aligned.length() == 0) {
-            return "ERROR: aligned.fasta missing";
-        }
-
-        ProcessBuilder pb;
-        if (method.equalsIgnoreCase("upgma")) {
-            pb = new ProcessBuilder("FastTree", "-noml", "aligned.fasta");
-        } else {
-            pb = new ProcessBuilder("FastTree", "aligned.fasta");
-        }
-
-        pb.redirectErrorStream(true);
-        Process process = pb.start();
-
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-        StringBuilder tree = new StringBuilder();
-        String line;
-
-        while ((line = reader.readLine()) != null) {
-            if (line.contains("(")) {
-                tree.append(line);
-            }
-        }
-        process.waitFor();
-        return tree.toString();
     }
 }
