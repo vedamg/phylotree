@@ -7,18 +7,13 @@
         body { font-family: 'Segoe UI', sans-serif; padding: 30px; background: #0b0e14; color: white; }
         .container { max-width: 900px; margin: auto; }
         h2 { border-bottom: 2px solid #007bff; padding-bottom: 10px; }
-        
         .section { background: #1a1d23; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #333; }
         label { display: block; margin-bottom: 10px; font-weight: bold; color: #00ffcc; }
-        
-        textarea { width: 100%; height: 120px; background: #252932; color: white; border: 1px solid #444; padding: 10px; font-family: monospace; }
-        select, input[type="file"] { width: 100%; padding: 10px; background: #252932; color: white; border: 1px solid #444; margin-bottom: 15px; }
-        
-        .btn-group { display: flex; gap: 10px; }
-        button { flex: 1; padding: 12px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        textarea { width: 100%; height: 150px; background: #252932; color: white; border: 1px solid #444; padding: 10px; font-family: monospace; }
+        select { width: 100%; padding: 10px; background: #252932; color: white; border: 1px solid #444; margin-bottom: 15px; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
         button:hover { background: #0056b3; }
-        
-        #output { margin-top: 20px; padding: 15px; background: #1a1d23; border-left: 4px solid #007bff; color: #ffcc00; }
+        #output { margin-top: 20px; padding: 15px; background: #1a1d23; border-left: 4px solid #007bff; color: #ffcc00; font-family: monospace; }
         svg { background: white; margin-top: 20px; border-radius: 8px; width: 100%; height: 500px; }
     </style>
 </head>
@@ -28,25 +23,21 @@
     <h2>Phylogenetic Tree App</h2>
 
     <div class="section">
-        <label>1. Input Method (FASTA / UniProt / File)</label>
-        <select id="inputMethod" onchange="toggleInput()">
+        <label>1. Input Sequences or UniProt IDs</label>
+        <select id="inputMethod">
             <option value="fasta">Paste FASTA Sequences</option>
-            <option value="uniprot">Fetch from UniProt (IDs)</option>
-            <option value="file">Upload .fasta File</option>
+            <option value="uniprot">Fetch from UniProt (Enter IDs below)</option>
         </select>
-
-        <textarea id="fastaInput" placeholder=">seq1\nATGC..."></textarea>
-        <input type="file" id="fileUpload" style="display:none;">
+        <textarea id="fastaInput" placeholder="Enter FASTA or IDs..."></textarea>
     </div>
 
     <div class="section">
         <label>2. Alignment Tool</label>
         <select id="algo">
-            <option value="mafft">MAFFT (Fast & Accurate)</option>
-            <option value="muscle">MUSCLE (Detailed)</option>
+            <option value="mafft">MAFFT</option>
+            <option value="muscle">MUSCLE</option>
         </select>
-        
-        <button onclick="runAnalysis()">Run Full Analysis</button>
+        <button onclick="runAnalysis()">Run Full Pipeline</button>
     </div>
 
     <div id="output">System Ready.</div>
@@ -56,46 +47,45 @@
 <script>
 const BASE = window.location.origin;
 
-function toggleInput() {
-    const method = document.getElementById("inputMethod").value;
-    document.getElementById("fastaInput").style.display = (method === 'file') ? 'none' : 'block';
-    document.getElementById("fileUpload").style.display = (method === 'file') ? 'block' : 'none';
-}
-
 async function runAnalysis() {
     const out = document.getElementById("output");
-    const algo = document.getElementById("algo").value;
-    out.innerText = "Connecting to Java backend...";
+    const fastaArea = document.getElementById("fastaInput");
+    const method = document.getElementById("inputMethod").value;
+    const tool = document.getElementById("algo").value;
+
+    out.innerText = "Step 1: Fetching/Formatting data...";
 
     try {
-        let data = document.getElementById("fastaInput").value;
+        // 1. Fetch data and update the Textarea
+        let fetchUrl = `${BASE}/api/fasta?data=${encodeURIComponent(fastaArea.value)}&method=${method}`;
+        let fetchRes = await fetch(fetchUrl);
+        if (!fetchRes.ok) throw new Error("API /fasta not found");
         
-        // Step 1: Send Data to Backend
-        // We pass the 'algo' so the Java code knows whether to call MAFFT or MUSCLE
-        await fetch(`${BASE}/api/fasta?data=${encodeURIComponent(data)}&tool=${algo}`);
-        out.innerText = `Aligning sequences using ${algo.toUpperCase()}...`;
+        let sequences = await fetchRes.text();
+        fastaArea.value = sequences; // Display the sequences for the user
+        
+        // 2. Align
+        out.innerText = `Step 2: Aligning with ${tool.toUpperCase()}...`;
+        let alignRes = await fetch(`${BASE}/api/align?tool=${tool}`);
+        if (!alignRes.ok) throw new Error("Alignment step failed");
 
-        // Step 2: Trigger Alignment
-        await fetch(`${BASE}/api/align`);
-        out.innerText = "Building Phylogenetic Tree (FastTree)...";
-
-        // Step 3: Fetch Resulting Newick Tree
-        let res = await fetch(`${BASE}/api/tree`);
-        let treeText = await res.text();
+        // 3. Tree
+        out.innerText = "Step 3: Building tree with FastTree...";
+        let treeRes = await fetch(`${BASE}/api/tree`);
+        let treeText = await treeRes.text();
 
         if (treeText.includes("(") && treeText.includes(")")) {
-            out.innerText = "Analysis Complete! Tree rendered below.";
+            out.innerText = "Success! Tree rendered below.";
             drawTree(treeText);
         } else {
             out.innerText = "Backend Error: " + treeText;
         }
     } catch (e) {
-        out.innerText = "Failed to communicate with server. Check Java logs.";
+        out.innerText = "Pipeline Error: " + e.message;
     }
 }
 
-// ... (Keep the drawTree, parseNewick, and randomColor functions from the previous version) ...
-
+// Keep your existing drawTree, parseNewick, and randomColor functions...
 function drawTree(newick) {
     document.getElementById("tree").innerHTML = "";
     const svg = d3.select("#tree");
@@ -104,20 +94,15 @@ function drawTree(newick) {
     const root = d3.hierarchy(parseNewick(newick));
     treeLayout(root);
     const g = svg.append("g").attr("transform", "translate(80,25)");
-
     g.selectAll("line").data(root.links()).enter().append("line")
         .attr("x1", d => d.source.y).attr("y1", d => d.source.x)
         .attr("x2", d => d.target.y).attr("y2", d => d.target.x)
         .attr("stroke", () => randomColor()).attr("stroke-width", 2);
-
     g.selectAll("circle").data(root.descendants()).enter().append("circle")
         .attr("cx", d => d.y).attr("cy", d => d.x).attr("r", 5).attr("fill", "#333");
-
     g.selectAll("text").data(root.descendants()).enter().append("text")
-        .attr("x", d => d.y + 10).attr("y", d => d.x + 5)
-        .attr("fill", "#333").style("font-size", "12px").text(d => d.data.name || "");
+        .attr("x", d => d.y + 10).attr("y", d => d.x + 5).attr("fill", "#333").text(d => d.data.name || "");
 }
-
 function parseNewick(s) {
     let ancestors = []; let tree = {};
     let tokens = s.split(/\s*(;|\(|\)|,|:)\s*/);
@@ -140,10 +125,7 @@ function parseNewick(s) {
     }
     return tree;
 }
-
-function randomColor() {
-    return ["#e63946", "#457b9d", "#2a9d8f", "#8338ec", "#f4a261"][Math.floor(Math.random() * 5)];
-}
+function randomColor() { return ["#e63946", "#457b9d", "#2a9d8f", "#8338ec", "#f4a261"][Math.floor(Math.random() * 5)]; }
 </script>
 </body>
 </html>
