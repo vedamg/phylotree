@@ -5,30 +5,48 @@
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 
     <style>
-        body { font-family: Arial; padding: 20px; background: #f5f5f5; }
-        textarea { width: 100%; height: 150px; margin-bottom: 10px; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; background: #0b0e14; color: white; }
+        h2 { border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        textarea { 
+            width: 100%; 
+            height: 150px; 
+            margin-bottom: 15px; 
+            background: #1a1d23; 
+            color: #00ffcc; 
+            border: 1px solid #333; 
+            padding: 10px;
+            font-family: monospace;
+        }
         button {
-            padding: 10px 15px;
-            margin: 5px;
+            padding: 12px 24px;
             background: #007bff;
             color: white;
             border: none;
             border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s;
         }
+        button:hover { background: #0056b3; }
         #output {
             margin-top: 20px;
-            padding: 10px;
-            background: white;
-            white-space: pre-wrap;
+            padding: 15px;
+            background: #1a1d23;
+            border-left: 4px solid #007bff;
+            min-height: 20px;
         }
         #tree {
-            margin-top: 20px;
+            margin-top: 30px;
+            background: #ffffff; /* White background for the tree to make colors pop */
+            border-radius: 8px;
         }
     </style>
 </head>
 <body>
 
 <h2>Phylogenetic Tree App</h2>
+
+<p>Enter your FASTA sequences below to generate an evolutionary tree:</p>
 
 <textarea id="fastaInput">
 >seq1
@@ -41,7 +59,7 @@ MKTAYIAKQRQISFVKSHFSRQDILDLWIYHTQGYFPDWQNA
 
 <button onclick="runAnalysis()">Run Analysis</button>
 
-<div id="output"></div>
+<div id="output">No analysis running.</div>
 <svg id="tree" width="800" height="400"></svg>
 
 <script>
@@ -50,39 +68,47 @@ const BASE = window.location.origin;
 
 async function runAnalysis() {
     const out = document.getElementById("output");
-    out.innerText = "Running...";
+    out.innerText = "Processing sequences and calculating distances...";
 
     let data = document.getElementById("fastaInput").value;
     let encoded = encodeURIComponent(data);
 
-    await fetch(`${BASE}/api/fasta?data=${encoded}`);
-    await fetch(`${BASE}/api/align`);
+    try {
+        // Step 1: Send FASTA
+        await fetch(`${BASE}/api/fasta?data=${encoded}`);
+        
+        // Step 2: Align
+        await fetch(`${BASE}/api/align`);
 
-    let res = await fetch(`${BASE}/api/tree`);
-    let tree = await res.text();
+        // Step 3: Get Tree Data
+        let res = await fetch(`${BASE}/api/tree`);
+        let treeData = await res.text();
 
-    out.innerText = tree;
-    drawTree(tree);
+        if (treeData) {
+            drawTree(treeData);
+            out.innerText = "Analysis Complete! Tree rendered below.";
+        } else {
+            out.innerText = "Error: Backend returned empty tree data.";
+        }
+    } catch (error) {
+        out.innerText = "Connection Error: Is the Java backend running?";
+        console.error(error);
+    }
 }
 
-
-// 🔥 SIMPLE TREE DRAW (WITH COLORS)
 function drawTree(newick) {
-
     document.getElementById("tree").innerHTML = "";
-
     const svg = d3.select("#tree");
     const width = 800, height = 400;
 
-    const treeLayout = d3.tree().size([height, width - 100]);
-
+    const treeLayout = d3.tree().size([height - 40, width - 160]);
     const root = d3.hierarchy(parseNewick(newick));
 
     treeLayout(root);
 
-    const g = svg.append("g").attr("transform", "translate(50,0)");
+    const g = svg.append("g").attr("transform", "translate(60,20)");
 
-    // links
+    // Links (Branches)
     g.selectAll("line")
         .data(root.links())
         .enter()
@@ -91,29 +117,32 @@ function drawTree(newick) {
         .attr("y1", d => d.source.x)
         .attr("x2", d => d.target.y)
         .attr("y2", d => d.target.x)
-        .attr("stroke", () => randomColor());
+        .attr("stroke", () => randomColor())
+        .attr("stroke-width", 2);
 
-    // nodes
+    // Nodes
     g.selectAll("circle")
         .data(root.descendants())
         .enter()
         .append("circle")
         .attr("cx", d => d.y)
         .attr("cy", d => d.x)
-        .attr("r", 4)
-        .attr("fill", "black");
+        .attr("r", 5)
+        .attr("fill", "#333");
 
-    // labels
+    // Labels
     g.selectAll("text")
         .data(root.descendants())
         .enter()
         .append("text")
-        .attr("x", d => d.y + 5)
-        .attr("y", d => d.x)
+        .attr("x", d => d.y + 10)
+        .attr("y", d => d.x + 5)
+        .attr("fill", "#333")
+        .style("font-size", "12px")
+        .style("font-weight", "bold")
         .text(d => d.data.name || "");
 }
 
-// 🔥 NEWICK PARSER
 function parseNewick(s) {
     let ancestors = [];
     let tree = {};
@@ -121,7 +150,6 @@ function parseNewick(s) {
 
     for (let i = 0; i < tokens.length; i++) {
         let token = tokens[i];
-
         switch (token) {
             case '(': 
                 let subtree = {};
@@ -130,20 +158,16 @@ function parseNewick(s) {
                 ancestors.push(tree);
                 tree = subtree;
                 break;
-
             case ',':
                 let sibling = {};
                 ancestors[ancestors.length - 1].children.push(sibling);
                 tree = sibling;
                 break;
-
             case ')':
                 tree = ancestors.pop();
                 break;
-
             case ':':
                 break;
-
             default:
                 if (tokens[i - 1] === ':' ) {
                     tree.length = parseFloat(token);
@@ -152,12 +176,11 @@ function parseNewick(s) {
                 }
         }
     }
-
     return tree;
 }
 
 function randomColor() {
-    const colors = ["red","blue","green","purple","orange","brown","teal"];
+    const colors = ["#e63946", "#457b9d", "#2a9d8f", "#8338ec", "#f4a261", "#70e000"];
     return colors[Math.floor(Math.random() * colors.length)];
 }
 
