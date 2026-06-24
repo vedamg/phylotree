@@ -3,6 +3,7 @@
 Live Website: https://treephylo-app.onrender.com
 
 Introduction:
+
 PhyloTree is a web-based bioinformatics application designed to perform multiple sequence alignment and generate phylogenetic trees from biological sequence data.
 The application allows users to input either raw FASTA sequences or UniProt IDs, processes them through established bioinformatics tools, and visualizes evolutionary relationships directly in the browser.
 This project demonstrates the integration of computational biology tools with web technologies**, making sequence analysis accessible through a simple and interactive interface.
