@@ -1,4 +1,4 @@
-*PhyloTree Web App*
+**PhyloTree Web App**
 
 Live Website: https://treephylo-app.onrender.com
 
